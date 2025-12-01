@@ -1,5 +1,6 @@
 import React, { useRef, useEffect, forwardRef, useImperativeHandle } from 'react';
 import { GameCanvasHandle, GameCanvasProps, Point } from '../types';
+import { audio } from '../utils/audio';
 
 // --- Game Constants ---
 const SHIELD_COOLDOWN = 35 * 60; // Frames
@@ -22,6 +23,36 @@ function drawModernOrb(ctx: CanvasRenderingContext2D, x: number, y: number, radi
 }
 
 // --- Game Entities ---
+class Projectile {
+    x: number;
+    y: number;
+    vx: number;
+    vy: number;
+    size: number = 4;
+    color: string = '#10B981';
+
+    constructor(x: number, y: number, targetX: number, targetY: number) {
+        this.x = x;
+        this.y = y;
+        const angle = Math.atan2(targetY - y, targetX - x);
+        const speed = 4;
+        this.vx = Math.cos(angle) * speed;
+        this.vy = Math.sin(angle) * speed;
+    }
+
+    update() {
+        this.x += this.vx;
+        this.y += this.vy;
+    }
+
+    draw(ctx: CanvasRenderingContext2D) {
+        ctx.fillStyle = this.color;
+        ctx.beginPath();
+        ctx.arc(this.x, this.y, this.size, 0, Math.PI * 2);
+        ctx.fill();
+    }
+}
+
 class Star {
     x: number;
     y: number;
@@ -156,29 +187,114 @@ class PowerUp {
     }
 }
 
+type EnemyType = 'seeker' | 'rammer' | 'shooter';
+
 class Enemy {
     x: number;
     y: number;
     speed: number;
     angle: number = 0;
     size: number;
+    type: EnemyType;
+    attackTimer: number = 0;
+    dead: boolean = false;
 
-    constructor(w: number, h: number) {
+    constructor(w: number, h: number, type: EnemyType, score: number) {
         this.x = Math.random() < 0.5 ? -50 : w + 50;
         this.y = Math.random() * h;
-        this.speed = Math.random() * 1.0 + 0.5;
-        this.size = Math.random() * 10 + 12;
+        this.type = type;
+
+        const isMobile = w < 768;
+
+        // Scale speed over 60,000 points
+        const speedMultiplier = 1 + (Math.min(score, 60000) / 60000); 
+        const mobileSpeedFactor = isMobile ? 0.8 : 1.0;
+
+        if (this.type === 'shooter') {
+            this.speed = (Math.random() * 0.5 + 0.3) * speedMultiplier * mobileSpeedFactor;
+            this.size = 15;
+        } else if (this.type === 'rammer') {
+            // Reduced Rammer speed
+            this.speed = (Math.random() * 1.8 + 1.2) * speedMultiplier * mobileSpeedFactor;
+            this.size = 12; 
+        } else {
+            this.type = 'seeker';
+            this.speed = (Math.random() * 1.0 + 0.5) * speedMultiplier * mobileSpeedFactor;
+            this.size = 14;
+        }
     }
 
-    update(targetX: number, targetY: number) {
-        const targetAngle = Math.atan2(targetY - this.y, targetX - this.x);
+    update(targetX: number, targetY: number, projectiles: Projectile[]) {
+        if (this.dead) return;
+
+        const dx = targetX - this.x;
+        const dy = targetY - this.y;
+        const dist = Math.sqrt(dx * dx + dy * dy);
+        const targetAngle = Math.atan2(dy, dx);
+        
+        if (this.type === 'shooter') {
+            // Keep distance
+            if (dist > 300) {
+                 this.x += Math.cos(targetAngle) * this.speed;
+                 this.y += Math.sin(targetAngle) * this.speed;
+            } else if (dist < 200) {
+                 this.x -= Math.cos(targetAngle) * this.speed;
+                 this.y -= Math.sin(targetAngle) * this.speed;
+            }
+            
+            this.attackTimer++;
+            if (this.attackTimer > 150) { // Fire every ~2.5s
+                projectiles.push(new Projectile(this.x, this.y, targetX, targetY));
+                this.attackTimer = 0;
+            }
+        } else if (this.type === 'rammer') {
+             // Aggressive tracking
+             this.x += Math.cos(targetAngle) * this.speed;
+             this.y += Math.sin(targetAngle) * this.speed;
+        } else {
+             // Standard seeker
+             this.x += Math.cos(targetAngle) * this.speed;
+             this.y += Math.sin(targetAngle) * this.speed;
+        }
+        
         this.angle = targetAngle;
-        this.x += Math.cos(this.angle) * this.speed;
-        this.y += Math.sin(this.angle) * this.speed;
     }
 
     draw(ctx: CanvasRenderingContext2D) {
-        drawModernOrb(ctx, this.x, this.y, this.size, '#FBA74B', '#EF4444');
+        if (this.type === 'shooter') {
+            // Hexagon green
+             ctx.save();
+             ctx.translate(this.x, this.y);
+             ctx.rotate(this.angle);
+             ctx.fillStyle = '#10B981';
+             ctx.beginPath();
+             for (let i = 0; i < 6; i++) {
+                 ctx.lineTo(this.size * Math.cos(i * Math.PI / 3), this.size * Math.sin(i * Math.PI / 3));
+             }
+             ctx.closePath();
+             ctx.fill();
+             // Eye
+             ctx.fillStyle = '#fff';
+             ctx.beginPath();
+             ctx.arc(0, 0, 4, 0, Math.PI * 2);
+             ctx.fill();
+             ctx.restore();
+        } else if (this.type === 'rammer') {
+            // Triangle purple
+             ctx.save();
+             ctx.translate(this.x, this.y);
+             ctx.rotate(this.angle);
+             ctx.fillStyle = '#A855F7';
+             ctx.beginPath();
+             ctx.moveTo(this.size + 5, 0);
+             ctx.lineTo(-this.size, this.size);
+             ctx.lineTo(-this.size, -this.size);
+             ctx.closePath();
+             ctx.fill();
+             ctx.restore();
+        } else {
+            drawModernOrb(ctx, this.x, this.y, this.size, '#FBA74B', '#EF4444');
+        }
     }
 }
 
@@ -214,24 +330,61 @@ class Particle {
     }
 }
 
+class Burst {
+    x: number;
+    y: number;
+    radius: number;
+    color: string;
+    opacity: number = 1;
+
+    constructor(x: number, y: number, color: string) {
+        this.x = x;
+        this.y = y;
+        this.color = color;
+        this.radius = 10;
+    }
+
+    update() {
+        this.radius += 3;
+        this.opacity -= 0.05;
+    }
+
+    draw(ctx: CanvasRenderingContext2D) {
+        ctx.save();
+        ctx.beginPath();
+        ctx.arc(this.x, this.y, this.radius, 0, Math.PI * 2);
+        ctx.strokeStyle = this.color;
+        ctx.lineWidth = 3;
+        ctx.globalAlpha = Math.max(0, this.opacity);
+        ctx.stroke();
+        ctx.restore();
+    }
+}
+
 // --- Component ---
-const GameCanvas = forwardRef<GameCanvasHandle, GameCanvasProps>(({ onGameOver, scoreRef, timerContainerRef, timerDigitsRef }, ref) => {
+const GameCanvas = forwardRef<GameCanvasHandle, GameCanvasProps>(({ onGameOver, scoreRef, timerContainerRef, timerDigitsRef, gameState }, ref) => {
     const canvasRef = useRef<HTMLCanvasElement>(null);
     const requestRef = useRef<number>(0);
     
-    // Use a ref for onGameOver so we don't need to restart the game loop when the prop changes
     const onGameOverRef = useRef(onGameOver);
+    const gameStateRef = useRef(gameState);
 
     useEffect(() => {
         onGameOverRef.current = onGameOver;
     }, [onGameOver]);
-    
-    // Game State stored in refs to avoid re-renders during loop
+
+    useEffect(() => {
+        gameStateRef.current = gameState;
+    }, [gameState]);
+
+    // Game State
     const state = useRef({
         player: null as Player | null,
         enemies: [] as Enemy[],
+        projectiles: [] as Projectile[],
         powerups: [] as PowerUp[],
         particles: [] as Particle[],
+        bursts: [] as Burst[],
         stars: [] as Star[],
         score: 0,
         frame: 0,
@@ -240,7 +393,9 @@ const GameCanvas = forwardRef<GameCanvasHandle, GameCanvasProps>(({ onGameOver, 
         shieldSpawnTimer: 0,
         width: 0,
         height: 0,
-        initialized: false
+        initialized: false,
+        nextShooterSpawnFrame: 0,
+        nextRammerSpawnFrame: 0
     });
 
     const initGame = () => {
@@ -257,14 +412,18 @@ const GameCanvas = forwardRef<GameCanvasHandle, GameCanvasProps>(({ onGameOver, 
             mouse: { x: w / 2, y: h / 2 },
             player: new Player(w / 2, h / 2),
             enemies: [],
+            projectiles: [],
             powerups: [],
             particles: [],
+            bursts: [],
             stars: [],
             score: 0,
             frame: 0,
             isGameOver: false,
             shieldSpawnTimer: 0,
-            initialized: true
+            initialized: true,
+            nextShooterSpawnFrame: 0,
+            nextRammerSpawnFrame: 0
         };
 
         // Init Stars
@@ -287,10 +446,9 @@ const GameCanvas = forwardRef<GameCanvasHandle, GameCanvasProps>(({ onGameOver, 
         const canvas = canvasRef.current;
         if (!canvas) return;
 
-        const ctx = canvas.getContext('2d', { alpha: false }); // Optimize
+        const ctx = canvas.getContext('2d', { alpha: false });
         if (!ctx) return;
 
-        // Only init if not already initialized
         if (!state.current.initialized) {
             initGame();
         }
@@ -309,15 +467,37 @@ const GameCanvas = forwardRef<GameCanvasHandle, GameCanvasProps>(({ onGameOver, 
             state.current.mouse.y = e.clientY;
         };
 
+        const handleTouchMove = (e: TouchEvent) => {
+            e.preventDefault();
+            state.current.mouse.x = e.touches[0].clientX;
+            state.current.mouse.y = e.touches[0].clientY;
+        };
+
         window.addEventListener('resize', handleResize);
         window.addEventListener('mousemove', handleMouseMove);
+        window.addEventListener('touchmove', handleTouchMove, { passive: false });
+        window.addEventListener('touchstart', handleTouchMove, { passive: false });
 
         const loop = () => {
             if (!ctx || !canvas) return;
 
             const s = state.current;
+            const currentGameState = gameStateRef.current;
+
+            // Start Screen / Menu Mode
+            if (currentGameState === 'start') {
+                ctx.fillStyle = '#08080a';
+                ctx.fillRect(0, 0, s.width, s.height);
+                for (const star of s.stars) {
+                    star.update();
+                    star.draw(ctx);
+                }
+                requestRef.current = requestAnimationFrame(loop);
+                return;
+            }
+
+            // Game Over Mode (Freeze frame with particles)
             if (s.isGameOver) {
-                // Keep drawing particles for effect
                  ctx.fillStyle = '#08080a';
                  ctx.fillRect(0, 0, s.width, s.height);
                  
@@ -334,12 +514,10 @@ const GameCanvas = forwardRef<GameCanvasHandle, GameCanvasProps>(({ onGameOver, 
             s.frame++;
             s.score++;
 
-            // Update DOM directly for performance
-            if (scoreRef.current && s.frame % 10 === 0) { // Throttle slightly
+            if (scoreRef.current && s.frame % 10 === 0) {
                 scoreRef.current.innerText = s.score.toLocaleString();
             }
 
-            // Clear BG
             ctx.fillStyle = '#08080a';
             ctx.fillRect(0, 0, s.width, s.height);
 
@@ -354,7 +532,6 @@ const GameCanvas = forwardRef<GameCanvasHandle, GameCanvasProps>(({ onGameOver, 
                 s.player.update(s.mouse.x, s.mouse.y);
                 s.player.draw(ctx, s.frame);
 
-                // Shield Timer UI
                 if (s.player.invincibleTimer > 0) {
                     if (timerContainerRef.current && timerContainerRef.current.style.display === 'none') {
                         timerContainerRef.current.style.display = 'block';
@@ -372,12 +549,41 @@ const GameCanvas = forwardRef<GameCanvasHandle, GameCanvasProps>(({ onGameOver, 
                 }
             }
 
-            // Enemies Spawning
-            if (s.frame % 40 === 0) {
-                s.enemies.push(new Enemy(s.width, s.height));
+            // Spawn Logic
+            const isMobile = s.width < 768;
+            const baseRate = isMobile ? 60 : 40;
+            const minRate = isMobile ? 30 : 20;
+            const currentSpawnRate = Math.max(minRate, baseRate - Math.floor(s.score / 500));
+            
+            if (s.frame % currentSpawnRate === 0) {
+                const seconds = s.frame / 60;
+                let spawnType: EnemyType = 'seeker';
+                
+                const shooters = s.enemies.filter(e => e.type === 'shooter').length;
+                const rammers = s.enemies.filter(e => e.type === 'rammer').length;
+                
+                const maxRammers = isMobile ? 2 : 4;
+                const maxShooters = isMobile ? 1 : 2;
+                
+                const canSpawnRammer = seconds >= 50 && rammers < maxRammers && s.frame >= s.nextRammerSpawnFrame;
+                const canSpawnShooter = seconds >= 25 && shooters < maxShooters && s.frame >= s.nextShooterSpawnFrame;
+                
+                const roll = Math.random();
+                
+                if (canSpawnRammer && roll < 0.4) {
+                    spawnType = 'rammer';
+                    // Initial stagger if needed, but death resets delay
+                    s.nextRammerSpawnFrame = s.frame + 120; 
+                } else if (canSpawnShooter && roll < 0.7) {
+                    spawnType = 'shooter';
+                    s.nextShooterSpawnFrame = s.frame + 120;
+                } else {
+                    spawnType = 'seeker';
+                }
+
+                s.enemies.push(new Enemy(s.width, s.height, spawnType, s.score));
             }
 
-            // Powerup Spawning
             if (s.player && s.player.invincibleTimer <= 0 && s.powerups.length === 0) {
                 s.shieldSpawnTimer++;
             }
@@ -386,7 +592,7 @@ const GameCanvas = forwardRef<GameCanvasHandle, GameCanvasProps>(({ onGameOver, 
                 s.shieldSpawnTimer = 0;
             }
 
-            // Powerups Logic
+            // Powerups
             for (let i = s.powerups.length - 1; i >= 0; i--) {
                 const p = s.powerups[i];
                 p.update();
@@ -399,7 +605,8 @@ const GameCanvas = forwardRef<GameCanvasHandle, GameCanvasProps>(({ onGameOver, 
                 const dist = Math.sqrt(dx * dx + dy * dy);
 
                 if (dist < 60) {
-                    s.player.invincibleTimer = 900; // 15s
+                    s.player.invincibleTimer = 900; 
+                    audio.playPowerUp();
                     for (let k = 0; k < 20; k++) {
                         s.particles.push(new Particle(p.x, p.y, '#34D399'));
                     }
@@ -409,12 +616,86 @@ const GameCanvas = forwardRef<GameCanvasHandle, GameCanvasProps>(({ onGameOver, 
                 }
             }
 
-            // Enemies Logic
+            // Projectiles
+            for (let i = s.projectiles.length - 1; i >= 0; i--) {
+                const p = s.projectiles[i];
+                p.update();
+                p.draw(ctx);
+                
+                if (p.x < 0 || p.x > s.width || p.y < 0 || p.y > s.height) {
+                    s.projectiles.splice(i, 1);
+                    continue;
+                }
+                
+                if (s.player) {
+                    const dx = p.x - s.player.x;
+                    const dy = p.y - s.player.y;
+                    const dist = Math.sqrt(dx * dx + dy * dy);
+                    if (dist < 15) { 
+                         if (s.player.invincibleTimer > 0) {
+                             s.projectiles.splice(i, 1);
+                         } else {
+                             s.isGameOver = true;
+                             audio.playGameOver();
+                             for (let k = 0; k < 30; k++) {
+                                 s.particles.push(new Particle(s.player.x, s.player.y, '#fff'));
+                             }
+                             if (onGameOverRef.current) {
+                                 onGameOverRef.current(s.score);
+                             }
+                         }
+                    }
+                }
+            }
+
+            // Enemy Collision Check (Friendly Fire / Crash)
+            for (let i = 0; i < s.enemies.length; i++) {
+                for (let j = i + 1; j < s.enemies.length; j++) {
+                    const e1 = s.enemies[i];
+                    const e2 = s.enemies[j];
+                    
+                    if (!e1.dead && !e2.dead) {
+                        if (e1.type === 'rammer' || e2.type === 'rammer') {
+                            const dx = e1.x - e2.x;
+                            const dy = e1.y - e2.y;
+                            const dist = Math.sqrt(dx * dx + dy * dy);
+                            
+                            if (dist < (e1.size + e2.size)) {
+                                e1.dead = true;
+                                e2.dead = true;
+                                
+                                // Reduced respawn delay: 3-6s (180-360 frames)
+                                if (e1.type === 'rammer' || e2.type === 'rammer') {
+                                    s.nextRammerSpawnFrame = s.frame + (Math.random() * 180 + 180);
+                                }
+                                if (e1.type === 'shooter' || e2.type === 'shooter') {
+                                    s.nextShooterSpawnFrame = s.frame + (Math.random() * 180 + 180);
+                                }
+                                
+                                s.score += 200;
+                                audio.playExplosion();
+                                const cx = (e1.x + e2.x) / 2;
+                                const cy = (e1.y + e2.y) / 2;
+                                for (let k = 0; k < 20; k++) {
+                                    s.particles.push(new Particle(cx, cy, '#A855F7'));
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Enemy Loop
             for (let i = s.enemies.length - 1; i >= 0; i--) {
                 const e = s.enemies[i];
+                if (e.dead) {
+                    s.enemies.splice(i, 1);
+                    continue;
+                }
+
                 if (!s.player) continue;
 
-                e.update(s.player.x, s.player.y);
+                e.update(s.player.x, s.player.y, s.projectiles);
                 e.draw(ctx);
 
                 const dx = e.x - s.player.x;
@@ -423,19 +704,33 @@ const GameCanvas = forwardRef<GameCanvasHandle, GameCanvasProps>(({ onGameOver, 
 
                 if (dist < (e.size + 12)) {
                     if (s.player.invincibleTimer > 0) {
-                        // Enemy Destroyed
+                        audio.playExplosion();
+                        
+                        let pColor = '#FBA74B';
+                        if (e.type === 'rammer') pColor = '#A855F7';
+                        if (e.type === 'shooter') pColor = '#10B981';
+                        
+                        // Add Burst
+                        s.bursts.push(new Burst(e.x, e.y, pColor));
+                        
+                        // Reduced respawn delay: 3-6s
+                        if (e.type === 'rammer') {
+                            s.nextRammerSpawnFrame = s.frame + (Math.random() * 180 + 180);
+                        } else if (e.type === 'shooter') {
+                            s.nextShooterSpawnFrame = s.frame + (Math.random() * 180 + 180);
+                        }
+
                         for (let k = 0; k < 15; k++) {
-                            s.particles.push(new Particle(e.x, e.y, '#FBA74B'));
+                            s.particles.push(new Particle(e.x, e.y, pColor));
                         }
                         s.score += 500;
                         s.enemies.splice(i, 1);
                     } else {
-                        // Game Over
                         s.isGameOver = true;
+                        audio.playGameOver();
                         for (let k = 0; k < 30; k++) {
                             s.particles.push(new Particle(e.x, e.y, '#fff'));
                         }
-                        // Use the Ref for onGameOver to call the latest stable function
                         if (onGameOverRef.current) {
                             onGameOverRef.current(s.score);
                         }
@@ -445,12 +740,19 @@ const GameCanvas = forwardRef<GameCanvasHandle, GameCanvasProps>(({ onGameOver, 
                 }
             }
 
-            // Particles
             for (let i = s.particles.length - 1; i >= 0; i--) {
                 const p = s.particles[i];
                 p.update();
                 p.draw(ctx);
                 if (p.life <= 0) s.particles.splice(i, 1);
+            }
+            
+            // Bursts
+            for (let i = s.bursts.length - 1; i >= 0; i--) {
+                const b = s.bursts[i];
+                b.update();
+                b.draw(ctx);
+                if (b.opacity <= 0) s.bursts.splice(i, 1);
             }
 
             requestRef.current = requestAnimationFrame(loop);
@@ -461,13 +763,13 @@ const GameCanvas = forwardRef<GameCanvasHandle, GameCanvasProps>(({ onGameOver, 
         return () => {
             window.removeEventListener('resize', handleResize);
             window.removeEventListener('mousemove', handleMouseMove);
+            window.removeEventListener('touchmove', handleTouchMove);
+            window.removeEventListener('touchstart', handleTouchMove);
             if (requestRef.current) cancelAnimationFrame(requestRef.current);
         };
-        // Removed props from dependencies to prevent full restart on every render
-        // Only empty dependency array ensures this runs once on mount
     }, []); 
 
-    return <canvas ref={canvasRef} className="block w-full h-full" />;
+    return <canvas ref={canvasRef} className="block w-full h-full touch-none" />;
 });
 
 export default GameCanvas;

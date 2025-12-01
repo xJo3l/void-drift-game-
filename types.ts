@@ -21,6 +21,7 @@ export interface GameCanvasProps {
     scoreRef: React.RefObject<HTMLDivElement>;
     timerContainerRef: React.RefObject<HTMLDivElement>;
     timerDigitsRef: React.RefObject<HTMLDivElement>;
+    gameState: 'start' | 'playing' | 'gameover';
 }
 
 export interface GameOverModalProps {
@@ -28,4 +29,9 @@ export interface GameOverModalProps {
     highScore: number;
     isNewHighScore: boolean;
     onRestart: () => void;
+    onHome: () => void;
+}
+
+export interface StartScreenProps {
+    onStart: () => void;
 }

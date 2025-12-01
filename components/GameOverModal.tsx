@@ -1,10 +1,10 @@
 import React from 'react';
 import { GameOverModalProps } from '../types';
 
-const GameOverModal: React.FC<GameOverModalProps> = ({ score, highScore, isNewHighScore, onRestart }) => {
+const GameOverModal: React.FC<GameOverModalProps> = ({ score, highScore, isNewHighScore, onRestart, onHome }) => {
   return (
-    <div className="absolute top-0 left-0 w-full h-full flex items-center justify-center z-50 bg-black/40 backdrop-blur-sm animate-float-up">
-      <div className="bg-[#18181b] px-16 py-12 rounded-3xl text-center border border-white/10 shadow-[0_20px_60px_rgba(0,0,0,0.6)]">
+    <div className="absolute top-0 left-0 w-full h-full flex items-center justify-center z-50 bg-black/60 backdrop-blur-sm animate-float-up">
+      <div className="bg-[#18181b] px-10 py-12 rounded-3xl text-center border border-white/10 shadow-[0_20px_60px_rgba(0,0,0,0.6)] w-[90%] max-w-[400px]">
         <div className="text-[12px] text-gray-400 tracking-[2px] uppercase mb-3">
           Game Over
         </div>
@@ -13,21 +13,30 @@ const GameOverModal: React.FC<GameOverModalProps> = ({ score, highScore, isNewHi
         </div>
         
         {isNewHighScore ? (
-            <div className="mb-8 flex flex-col items-center gap-1">
+            <div className="mb-10 flex flex-col items-center gap-1">
                 <span className="text-cyan-400 text-sm tracking-widest font-bold uppercase animate-pulse-text">New High Score!</span>
             </div>
         ) : (
-            <div className="mb-8 text-gray-500 text-xs tracking-widest uppercase font-bold">
+            <div className="mb-10 text-gray-500 text-xs tracking-widest uppercase font-bold">
                 Best: {highScore.toLocaleString()}
             </div>
         )}
 
-        <button 
-          onClick={onRestart}
-          className="bg-white text-black border-none px-10 py-4 rounded-xl font-extrabold text-[14px] tracking-widest uppercase cursor-pointer hover:-translate-y-0.5 hover:shadow-lg transition-all duration-200"
-        >
-          Play Again
-        </button>
+        <div className="flex flex-col gap-3">
+            <button 
+            onClick={onRestart}
+            className="w-full bg-white text-black border-none px-8 py-4 rounded-xl font-extrabold text-[14px] tracking-widest uppercase cursor-pointer hover:-translate-y-0.5 hover:shadow-lg transition-all duration-200"
+            >
+            Play Again
+            </button>
+            
+            <button 
+            onClick={onHome}
+            className="w-full bg-transparent text-white/40 hover:text-white border border-white/10 hover:border-white/30 px-8 py-3 rounded-xl font-bold text-[12px] tracking-widest uppercase cursor-pointer hover:bg-white/5 transition-all duration-200"
+            >
+            Return Home
+            </button>
+        </div>
       </div>
     </div>
   );
